@@ -17,4 +17,5 @@ run/
 *.xls
 backend/weights/
 .env
-.idea
+.idea/
+
