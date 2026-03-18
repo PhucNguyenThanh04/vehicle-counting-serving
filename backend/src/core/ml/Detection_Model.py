@@ -14,6 +14,7 @@ class DetectionModel:
                  ) -> None:
         self.model = YOLO(model_path)
         self.model.to(device)
+        self.clsnames = self.model.names
         # print(self.model.names)
         self.conf_thresh = conf_thresh
         self.iou_thresh = iou_thresh
@@ -22,17 +23,39 @@ class DetectionModel:
         # self.palette = sv.ColorPalette.default()
 
         self.palette = sv.ColorPalette.from_hex([
-            "#336666", "#00FF00", "#00FFFF",
-            # "#FF99CC", "#FF6633"
+            "#FF99CC", "#FF6633", "#FFCC00",
+            "#FF99CC", "#FF6633"
         ])
 
-    def tracking_frame(self, frame: np.ndarray) -> sv.Detections:
+    # def tracking_frame(self, frame: np.ndarray) -> sv.Detections:
+    #
+    #     results = self.model(
+    #         frame, verbose=False, conf=self.conf_thresh, iou=self.iou_thresh, half=True
+    #     )[0]
+    #     detections =sv.Detections.from_ultralytics(results)
+    #     detections =self.tracker.update_with_detections(detections=detections)
+    #     return detections
+    def tracking_frame(self, frame: np.ndarray, roi:tuple = None) -> sv.Detections:
+        if roi is not None:
+            x1, y1, x2, y2 = roi
+            cropped = frame[y1:y2, x1:x2]
+            results = self.model(
+                cropped, verbose=False, conf=self.conf_thresh, iou=self.iou_thresh, half=True
+            )[0]
+            detections = sv.Detections.from_ultralytics(results)
+            # Offset bbox về tọa độ frame gốc
+            if len(detections) > 0:
+                detections.xyxy[:, 0] += x1
+                detections.xyxy[:, 1] += y1
+                detections.xyxy[:, 2] += x1
+                detections.xyxy[:, 3] += y1
+        else:
+            results = self.model(
+                frame, verbose=False, conf=self.conf_thresh, iou=self.iou_thresh, half=True
+            )[0]
+            detections = sv.Detections.from_ultralytics(results)
 
-        results = self.model(
-            frame, verbose=False, conf=self.conf_thresh, iou=self.iou_thresh, half=True
-        )[0]
-        detections =sv.Detections.from_ultralytics(results)
-        detections =self.tracker.update_with_detections(detections=detections)
+        detections = self.tracker.update_with_detections(detections=detections)
         return detections
 
     def annotation_frame(self, frame: np.ndarray,

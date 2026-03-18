@@ -18,11 +18,11 @@ from src.core.ml.ZoneCounter import ZoneCounter, ZoneCounterManager, ZoneConfig
 import json
 
 
-def load_zone_manager(config_path: str) -> ZoneCounterManager:
+def load_zone_manager(config_path: str, class_names) -> ZoneCounterManager:
     with open(config_path) as f:
         data = json.load(f)
     configs = [ZoneConfig(**z) for z in data["zone"]]
-    return ZoneCounterManager(configs)
+    return ZoneCounterManager(configs,class_names )
 
 class VideoProcessor:
     def __init__(self,
@@ -34,7 +34,7 @@ class VideoProcessor:
                  ) -> None:
 
         # Xử lý 1 frame trên 3 frame để tối ưu
-        self._FRAME_SKIP = 3
+        self._FRAME_SKIP = 1
         self.model = DetectionModel(
             model_path = weight_model,
             device = device,
@@ -42,9 +42,10 @@ class VideoProcessor:
             iou_thresh = iou_thresh
 
         )
+        self.roi = (2, 256, 1277, 611)
         self.reader = MJPEGReader(url)
 
-        self.zone_manager = load_zone_manager("src/core/zone.json")
+        self.zone_manager = load_zone_manager("src/core/zone.json", class_names=self.model.model.names)
 
         #fps
         self.frame_counter = 0
@@ -61,45 +62,15 @@ class VideoProcessor:
     def __exit__(self, *_):
         self.reader.stop()
 
-    # def process_video(self) -> None:
-    #     last_annotated = None
-    #     with self.reader:
-    #         for frame_data in self.reader.frames():
-    #
-    #             if frame_data.image is None:
-    #                 continue
-    #
-    #             frame = frame_data.image
-    #
-    #             if frame_data.index % self._FRAME_SKIP == 0:
-    #                 timestamp = datetime.datetime.now()
-    #                 last_annotated = self.process_frame(frame, timestamp)
-    #
-    #             if last_annotated is not None:
-    #                 # yield last_annotated
-    #                 cv2.imshow("YOLO Detection", last_annotated)
-    #                 if cv2.waitKey(1) & 0xFF == ord("q"):
-    #                     break
-    #     cv2.destroyAllWindows()
-    # def process_frame(self, frame: np.ndarray, timestamp: datetime) -> np.ndarray:
-    #
-    #     detections = self.model.tracking_frame(frame=frame)
-    #
-    #     frame_anotate = frame.copy()
-    #
-    #     frame_anotate = self.model.annotation_frame(frame=frame_anotate, detections=detections)
-    #
-    #     self.zone_manager.update_all(detections=detections, timestamp=timestamp)
-    #     frame_anotate = self.zone_manager.draw_all(frame=frame_anotate)
-    #     frame_anotate = self.draw_real_fps(frame=frame_anotate)
-    #
-    #     return frame_anotate
-
     def process_video(self) -> None:
         last_annotated = None
+        TARGET_FPS = 25
+        FRAME_TIME = 1.0 / TARGET_FPS
 
         with self.reader:
             for frame_data in self.reader.frames():
+
+                start_loop = time.time()
 
                 if frame_data.image is None:
                     continue
@@ -108,7 +79,7 @@ class VideoProcessor:
 
                 if frame_data.index % self._FRAME_SKIP == 0:
                     # Lỗi 1+2 sửa: dùng datetime object, không strftime
-                    timestamp = datetime.datetime.now()
+                    timestamp = datetime.datetime.now().replace(microsecond=0)
                     last_annotated = self.process_frame(frame, timestamp)
 
                 if last_annotated is not None:
@@ -116,11 +87,16 @@ class VideoProcessor:
                     if cv2.waitKey(1) & 0xFF == ord("q"):
                         break
 
+                elapsed = time.time() - start_loop
+                sleep_time = FRAME_TIME - elapsed
+                if sleep_time > 0:
+                    time.sleep(sleep_time)
+
         cv2.destroyAllWindows()
 
     def process_frame(self, frame: np.ndarray, timestamp: datetime.datetime) -> np.ndarray:
 
-        detections = self.model.tracking_frame(frame=frame)
+        detections = self.model.tracking_frame(frame=frame, roi=self.roi)
 
         frame_annotated = frame.copy()
         frame_annotated = self.model.annotation_frame(
@@ -151,21 +127,23 @@ class VideoProcessor:
         return frame
 
 
-if __name__ == '__main__':
-    STREAM_URL = "http://localhost:8080/stream"
-    WEIGHT_MODEL = "weights/yolov8m.pt"
-    DEVICE = torch.device("cuda:0")
-    CONF_THRESH = 0.5
-    IOU_THRESH = 0.5
+# if __name__ == '__main__':
+#     STREAM_URL = "http://localhost:8080/stream"
+#     WEIGHT_MODEL = "weights/yolo26m.pt"
+#     DEVICE = torch.device("cuda:0")
+#     CONF_THRESH = 0.5
+#     IOU_THRESH = 0.5
+#
+#     processor = VideoProcessor(
+#         url=STREAM_URL,
+#         weight_model=WEIGHT_MODEL,
+#         device=DEVICE,
+#         conf_thresh=CONF_THRESH,
+#         iou_thresh=IOU_THRESH
+#     )
+#     processor.process_video()
+#
 
-    processor = VideoProcessor(
-        url=STREAM_URL,
-        weight_model=WEIGHT_MODEL,
-        device=DEVICE,
-        conf_thresh=CONF_THRESH,
-        iou_thresh=IOU_THRESH
-    )
-    processor.process_video()
 
 
 
