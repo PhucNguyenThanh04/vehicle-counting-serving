@@ -12,10 +12,10 @@ from src.core.ml.utils import get_foot_position
 @dataclass
 class ZoneConfig:
     zone_id: str
-    polygon: list[list[int]]    # [[x1,y1],[x2,y2],...]
-    color: tuple[int,int,int] # BGR cho visualization
+    polygon: list[list[int]]
+    color: tuple[int,int,int]
     length: float
-    name: str = ""           # tên hiển thị, ví dụ "Lane 1 inbound"
+    name: str = ""
 
 @dataclass
 class VehicleEvent:
@@ -102,7 +102,7 @@ class ZoneCounter:
                 ev.speed = self.config.length / ev.time_in_zone * 3.6 if ev.time_in_zone > 0 else 0.0
             self.inside_ids.discard(track_id)
             self.active.pop(track_id, None)
-            print(f"{ev.direction}, {ev.first_seen}, {ev.last_seen}, {ev.time_in_zone}s")
+            # print(f"{ev.direction}, {ev.first_seen}, {ev.last_seen}, {ev.time_in_zone}s")
 
         return new_events
 
@@ -183,7 +183,7 @@ class ZoneCounterManager:
 
         return all_events
 
-    def get_counts(self) -> dict:
+    def get_all_counts(self) -> dict:
 
         return {
             zone_id: zone.counts

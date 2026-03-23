@@ -4,7 +4,7 @@ import torch
 
 if __name__ == '__main__':
     STREAM_URL = "http://localhost:8080/stream"
-    WEIGHT_MODEL = "../weights/yolov8m.pt"
+    WEIGHT_MODEL = "../weights/v8_ve.pt"
     DEVICE = torch.device("cuda:0")
     CONF_THRESH = 0.5
     IOU_THRESH = 0.5

@@ -1,151 +1,154 @@
-import datetime
 import os
-os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
 os.environ["NUMEXPR_NUM_THREADS"] = "1"
 
-
+import datetime
+import threading
 import cv2
 import torch
 import numpy as np
 import time
+import json
+
 from src.core.ml.mjpeg_reader import MJPEGReader
 from src.core.ml.Detection_Model import DetectionModel
-from src.core.ml.ZoneCounter import ZoneCounter, ZoneCounterManager, ZoneConfig
-import json
+from src.core.ml.ZoneCounter import ZoneCounterManager, ZoneConfig
+from src.core.config import configs
 
 
 def load_zone_manager(config_path: str, class_names) -> ZoneCounterManager:
     with open(config_path) as f:
         data = json.load(f)
     configs = [ZoneConfig(**z) for z in data["zone"]]
-    return ZoneCounterManager(configs,class_names )
+    return ZoneCounterManager(configs, class_names)
+
 
 class VideoProcessor:
     def __init__(self,
-                 url: str,
-                 weight_model : str,
+                 url_camera_ip: str,
+                 weight_model: str,
                  device: torch.device,
                  conf_thresh: float,
-                 iou_thresh:float
+                 iou_thresh: float
                  ) -> None:
-
-        # Xử lý 1 frame trên 3 frame để tối ưu
         self._FRAME_SKIP = 1
         self.model = DetectionModel(
-            model_path = weight_model,
-            device = device,
-            conf_thresh = conf_thresh,
-            iou_thresh = iou_thresh
-
+            model_path=weight_model,
+            device=device,
+            conf_thresh=conf_thresh,
+            iou_thresh=iou_thresh
         )
         self.roi = (2, 256, 1277, 611)
-        self.reader = MJPEGReader(url)
+        self.reader = MJPEGReader(url_camera_ip)
+        self.zone_manager = load_zone_manager(
+            "src/core/zone.json",
+            class_names=self.model.clsnames
+        )
 
-        self.zone_manager = load_zone_manager("src/core/zone.json", class_names=self.model.model.names)
-
-        #fps
+        # FPS
         self.frame_counter = 0
         self.start_time = time.time()
-        self.real_fps = 0
+        self.real_fps = 0.0
+
+        # thread
+        self._jpg_cache: bytes | None = None
+        self._jpg_lock = threading.Lock()
+        self._stop_event = threading.Event()
+        self._thread: threading.Thread | None = None
 
 
+    def start(self) -> None:
+        self._stop_event.clear()
+        self._thread = threading.Thread(
+            target=self.ml_loop, daemon=True, name="ml pipeline"
+        )
+        self._thread.start()
 
-
-    def __enter__(self):
-        self.reader.start()
-        return self
-
-    def __exit__(self, *_):
+    def stop(self) -> None:
+        self._stop_event.set()
         self.reader.stop()
+        if self._thread:
+            self._thread.join(timeout=5)
 
-    def process_video(self) -> None:
-        last_annotated = None
+    def ml_loop(self) -> None:
         TARGET_FPS = 25
         FRAME_TIME = 1.0 / TARGET_FPS
 
         with self.reader:
             for frame_data in self.reader.frames():
-
-                start_loop = time.time()
+                if self._stop_event.is_set():
+                    break
 
                 if frame_data.image is None:
                     continue
 
-                frame = frame_data.image
+                t0 = time.perf_counter()
 
+                frame = frame_data.image
                 if frame_data.index % self._FRAME_SKIP == 0:
-                    # Lỗi 1+2 sửa: dùng datetime object, không strftime
                     timestamp = datetime.datetime.now().replace(microsecond=0)
                     last_annotated = self.process_frame(frame, timestamp)
 
-                if last_annotated is not None:
-                    cv2.imshow("YOLO Detection", last_annotated)
-                    if cv2.waitKey(1) & 0xFF == ord("q"):
-                        break
+                    _, buf = cv2.imencode(
+                        ".jpg", last_annotated,
+                        [cv2.IMWRITE_JPEG_QUALITY, 70],
+                    )
+                    with self._jpg_lock:
+                        self._jpg_cache = buf.tobytes()
 
-                elapsed = time.time() - start_loop
-                sleep_time = FRAME_TIME - elapsed
-                if sleep_time > 0:
-                    time.sleep(sleep_time)
+                elapsed = time.perf_counter() - t0
+                wait = FRAME_TIME - elapsed
+                if wait > 0:
+                    time.sleep(wait)
 
-        cv2.destroyAllWindows()
-
-    def process_frame(self, frame: np.ndarray, timestamp: datetime.datetime) -> np.ndarray:
-
-        detections = self.model.tracking_frame(frame=frame, roi=self.roi)
-
-        frame_annotated = frame.copy()
-        frame_annotated = self.model.annotation_frame(
-            frame=frame_annotated, detections=detections
-        )
-
+    def process_frame(
+            self, frame: np.ndarray, timestamp: datetime.datetime
+    ) -> np.ndarray:
+        detections = self.model.tracking_frame(frame=frame)
+        frame_annotated = self.model.annotation_frame(frame=frame.copy(), detections=detections)
         self.zone_manager.update_all(detection=detections, timestamp=timestamp)
         frame_annotated = self.zone_manager.draw_all(frame=frame_annotated)
-        frame_annotated = self.draw_real_fps(frame=frame_annotated)
-
+        frame_annotated = self.draw_fps(frame=frame_annotated)
         return frame_annotated
 
-
-
-
-    def draw_real_fps(self, frame: np.ndarray) -> np.ndarray:
+    def draw_fps(self, frame: np.ndarray) -> np.ndarray:
         self.frame_counter += 1
-        current_time = time.time()
-        elapsed = current_time - self.start_time
-
+        elapsed = time.time() - self.start_time
         if elapsed >= 1.0:
             self.real_fps = self.frame_counter / elapsed
             self.frame_counter = 0
-            self.start_time = current_time
+            self.start_time = time.time()
         cv2.putText(
-            frame, f"FPS: {self.real_fps:.1f}", (0 + 50,  0 + 60), cv2.FONT_HERSHEY_SIMPLEX,
-            1, (0, 255, 0), 2, cv2.LINE_AA)
+            frame, f"FPS: {self.real_fps:.1f}",
+            (50, 60), cv2.FONT_HERSHEY_SIMPLEX,
+            1, (0, 255, 0), 2, cv2.LINE_AA,
+        )
         return frame
 
-
-# if __name__ == '__main__':
-#     STREAM_URL = "http://localhost:8080/stream"
-#     WEIGHT_MODEL = "weights/yolo26m.pt"
-#     DEVICE = torch.device("cuda:0")
-#     CONF_THRESH = 0.5
-#     IOU_THRESH = 0.5
-#
-#     processor = VideoProcessor(
-#         url=STREAM_URL,
-#         weight_model=WEIGHT_MODEL,
-#         device=DEVICE,
-#         conf_thresh=CONF_THRESH,
-#         iou_thresh=IOU_THRESH
-#     )
-#     processor.process_video()
-#
+    def run_local(self) -> None:
+        last_annotated = None
+        with self.reader:
+            for frame_data in self.reader.frames():
+                if frame_data.image is None:
+                    continue
+                if frame_data.index % self._FRAME_SKIP == 0:
+                    timestamp = datetime.datetime.now().replace(microsecond=0)
+                    last_annotated = self.process_frame(frame=frame_data.image, timestamp=timestamp)
+                if last_annotated is not None:
+                    cv2.imshow("frame", last_annotated)
+                    if cv2.waitKey(1) & 0XFF == 27:
+                        break
+        cv2.destroyAllWindows()
 
 
+    def get_jpg(self) -> bytes | None:
+        with self._jpg_lock:
+            return self._jpg_cache
 
-
-
-
+    def get_counts(self) -> dict:
+        """Đọc thẳng từ zone_manager — không cần queue."""
+        return self.zone_manager.get_all_counts()

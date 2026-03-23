@@ -1,0 +1,81 @@
+from contextlib import asynccontextmanager
+import asyncio
+import torch
+
+from fastapi import FastAPI
+from fastapi.responses import StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
+
+from src.core.ml.Video_Processor import VideoProcessor
+from src.core.config import configs
+from src.utils.logger import setup_logger
+
+import logging
+
+# set up logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s"
+)
+
+logger = setup_logger(__name__)
+
+processor: VideoProcessor | None = None
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global processor
+    processor = VideoProcessor(
+        url_camera_ip=configs.STREAM_URL,
+        weight_model=configs.WEIGHT_MODEL_PATH,
+        device=torch.device("cuda:0"),
+        conf_thresh=0.5,
+        iou_thresh=0.5,
+    )
+    logger.info("load xong model + preprocess cho stream")
+    processor.start()
+    yield
+    processor.stop()
+
+app = FastAPI(
+    title="Vehicle Tracking API",
+    lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins  = ["*"],
+    allow_methods  = ["*"],
+    allow_headers  = ["*"],
+)
+
+
+@app.get("/")
+async def root():
+    return {"message": "Vehicle Tracking API is running"}
+
+
+async def _mjpeg_generator():
+    while True:
+        jpg = processor.get_jpg()
+        if jpg is not None:
+            yield (
+                b"--frame\r\n"
+                b"Content-Type: image/jpeg\r\n\r\n"
+                + jpg
+                + b"\r\n"
+            )
+        await asyncio.sleep(0.04)
+
+
+@app.get("/stream")
+async def stream():
+    logger.info("start stream video")
+    return StreamingResponse(
+        _mjpeg_generator(),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+    )
+
+@app.get("/counts")
+async def get_counts():
+    logger.info("lay so xe dem duoc tung vung")
+    return processor.get_counts()
