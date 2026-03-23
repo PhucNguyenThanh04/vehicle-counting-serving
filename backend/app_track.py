@@ -9,21 +9,22 @@ os.environ["NUMEXPR_NUM_THREADS"] = "1"
 import torch.backends.cudnn as cudnn
 from src.core.ml.Video_Processor import VideoProcessor
 import torch
-
+from src.core.config import configs
 if __name__ == '__main__':
     cudnn.benchmark = True
 
-    STREAM_URL = "http://localhost:8080/stream"
-    WEIGHT_MODEL = "weights/v8_ve.pt"
+    STREAM_URL = configs.STREAM_URL
     DEVICE = torch.device("cuda:0")
     CONF_THRESH = 0.5
     IOU_THRESH = 0.5
 
+    print(configs.WEIGHT_MODEL_PATH)
+
     processor = VideoProcessor(
         url=STREAM_URL,
-        weight_model=WEIGHT_MODEL,
+        weight_model=configs.WEIGHT_MODEL_PATH,
         device=DEVICE,
         conf_thresh=CONF_THRESH,
         iou_thresh=IOU_THRESH
     )
-    processor.process_video()
+    processor.run_local()

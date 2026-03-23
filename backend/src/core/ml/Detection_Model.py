@@ -4,6 +4,10 @@ from ultralytics import YOLO
 import torch
 import supervision as sv
 from src.core.ml.utils import get_foot_position
+from src.utils.logger import setup_logger
+
+logger = setup_logger(__name__)
+
 
 class DetectionModel:
     def __init__(self,
@@ -24,39 +28,39 @@ class DetectionModel:
 
         self.palette = sv.ColorPalette.from_hex([
             "#FF99CC", "#FF6633", "#FFCC00",
-            "#FF99CC", "#FF6633"
+            "#FF99CC"
         ])
 
-    # def tracking_frame(self, frame: np.ndarray) -> sv.Detections:
-    #
-    #     results = self.model(
-    #         frame, verbose=False, conf=self.conf_thresh, iou=self.iou_thresh, half=True
-    #     )[0]
-    #     detections =sv.Detections.from_ultralytics(results)
-    #     detections =self.tracker.update_with_detections(detections=detections)
-    #     return detections
-    def tracking_frame(self, frame: np.ndarray, roi:tuple = None) -> sv.Detections:
-        if roi is not None:
-            x1, y1, x2, y2 = roi
-            cropped = frame[y1:y2, x1:x2]
-            results = self.model(
-                cropped, verbose=False, conf=self.conf_thresh, iou=self.iou_thresh, half=True
-            )[0]
-            detections = sv.Detections.from_ultralytics(results)
-            # Offset bbox về tọa độ frame gốc
-            if len(detections) > 0:
-                detections.xyxy[:, 0] += x1
-                detections.xyxy[:, 1] += y1
-                detections.xyxy[:, 2] += x1
-                detections.xyxy[:, 3] += y1
-        else:
-            results = self.model(
-                frame, verbose=False, conf=self.conf_thresh, iou=self.iou_thresh, half=True
-            )[0]
-            detections = sv.Detections.from_ultralytics(results)
+    def tracking_frame(self, frame: np.ndarray) -> sv.Detections:
 
-        detections = self.tracker.update_with_detections(detections=detections)
+        results = self.model(
+            frame, verbose=False, conf=self.conf_thresh, iou=self.iou_thresh, half=True
+        )[0]
+        detections =sv.Detections.from_ultralytics(results)
+        detections =self.tracker.update_with_detections(detections=detections)
         return detections
+    # def tracking_frame(self, frame: np.ndarray, roi:tuple = None) -> sv.Detections:
+    #     if roi is not None:
+    #         x1, y1, x2, y2 = roi
+    #         cropped = frame[y1:y2, x1:x2]
+    #         results = self.model(
+    #             cropped, verbose=False, conf=self.conf_thresh, iou=self.iou_thresh, half=True
+    #         )[0]
+    #         detections = sv.Detections.from_ultralytics(results)
+    #         # Offset bbox về tọa độ frame gốc
+    #         if len(detections) > 0:
+    #             detections.xyxy[:, 0] += x1
+    #             detections.xyxy[:, 1] += y1
+    #             detections.xyxy[:, 2] += x1
+    #             detections.xyxy[:, 3] += y1
+    #     else:
+    #         results = self.model(
+    #             frame, verbose=False, conf=self.conf_thresh, iou=self.iou_thresh, half=True
+    #         )[0]
+    #         detections = sv.Detections.from_ultralytics(results)
+    #
+    #     detections = self.tracker.update_with_detections(detections=detections)
+    #     return detections
 
     def annotation_frame(self, frame: np.ndarray,
                          detections: sv.Detections) -> np.ndarray:

@@ -94,7 +94,7 @@ if __name__ == '__main__':
     import os
     from dotenv import load_dotenv
     load_dotenv()
-    path = sys.argv[1] if len(sys.argv) > 1 else "../../videos/wqctLW0Hb_0.mp4"
+    path = int(sys.argv[1]) if len(sys.argv) > 1 else "../../videos/wqctLW0Hb_0.mp4"
     start_server(path, host=str(os.getenv("HOST_CAMERA")), port=int(os.getenv("PORT_CAMERA")), fps=25)
 
 

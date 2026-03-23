@@ -1,22 +1,14 @@
-import numpy as np
-class Config:
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+class Config(BaseSettings):
+    DATABASE_URL: str
+    WEIGHT_MODEL_PATH: str
+    STREAM_URL: str
+    HOST_CAMERA: str
+    PORT_CAMERA: int
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
-# configs = Config()
+configs = Config()
 
-
-
-
-
-
-
-# polyzone = [
-#     np.array([[383, 375], [452, 377], [262, 536], [136, 530]]),
-#     np.array([[454, 375], [524, 378], [395, 540], [264, 536]]),
-#     np.array([[530, 378], [596, 376], [542, 547], [398, 538]]),
-#     np.array([[678, 361], [748, 366], [871, 537], [734, 536]]),
-#     np.array([[807, 368], [1000, 538], [876, 538], [750, 364]]),
-#     np.array([[885, 373], [1138, 533], [1006, 540], [810, 367]])
-# ]
