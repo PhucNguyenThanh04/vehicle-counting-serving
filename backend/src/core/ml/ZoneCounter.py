@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Optional
 import supervision as sv
 from collections import deque
 from copy import copy
@@ -8,68 +9,98 @@ from datetime import datetime
 from src.core.ml.utils import get_foot_position
 
 
-
 @dataclass
 class ZoneConfig:
     zone_id: str
     polygon: list[list[int]]
-    color: tuple[int,int,int]
-    length: float
+    color: tuple[int, int, int]
+    length: float          # Chiều dài thực của zone (m) — dùng làm fallback
     name: str = ""
+
 
 @dataclass
 class VehicleEvent:
     track_id: int
-    cls: str
+    cls: str               # Tên class (str), không phải class_id (int)
     zone_id: str
 
     first_seen: datetime
     last_seen: datetime
 
-    entry_point: tuple[float, float] = None
-    exit_point: tuple[float, float] = None
-    speed: float = 0.0  # Tính bằng km/h , có thể cập nhật sau khi rời zone
-    direction: str = "unknown"  # "up", "down", "unknown"
-    time_in_zone : float = 0.0 # Tính bằng giây, cập nhật khi xe rời zone
+    entry_point: Optional[tuple[float, float]] = None
+    exit_point: Optional[tuple[float, float]] = None
+    speed: float = 0.0
+    direction: str = "unknown"
+    time_in_zone: float = 0.0
+
+
+_FONT = cv2.FONT_HERSHEY_SIMPLEX
+_INFO_FONT_SCALE = 0.5
+_INFO_THICKNESS = 1
+_LINE_HEIGHT = 20
 
 
 class ZoneCounter:
     def __init__(self, config: ZoneConfig, class_names: dict = None):
         self.config = config
         self.polygon = np.array(config.polygon, dtype=np.int32)
+
+        # track_id đã từng đi vào (để đếm đúng 1 lần / lượt)
         self.counted_ids: set[int] = set()
+
+        # {cls_name: count}
         self.counts: dict[str, int] = {}
+
+        # track_id hiện đang ở trong zone
         self.inside_ids: set[int] = set()
+
+        # Events đã hoàn chỉnh (xe đã rời zone, có đủ speed + direction)
         self.events: deque[VehicleEvent] = deque(maxlen=100)
+
+        # Events đang theo dõi (xe còn trong zone)
         self.active: dict[int, VehicleEvent] = {}
+
         self.class_names = class_names or {}
 
-    def update(self, detection: sv.Detections, timestamp: datetime
-               ) -> list[VehicleEvent]:
+    # ── public ──
 
-        new_events = []
-        current_ids = set()
+    def update(
+        self,
+        detection: sv.Detections,
+        timestamp: datetime,
+    ) -> list[VehicleEvent]:
+        """
+        Cập nhật zone với detections mới.
 
-        for track_id, cls, bbox in zip(
-                detection.tracker_id,
-                detection.class_id,
-                detection.xyxy
+        Returns
+        -------
+        list[VehicleEvent]
+            Các event **vừa hoàn chỉnh** trong frame này
+            (xe vừa rời zone, đã có speed / direction / time_in_zone).
+        """
+        if detection.tracker_id is None or len(detection.tracker_id) == 0:
+            return self._flush_exited(set(), timestamp)
+
+        current_ids: set[int] = set()
+
+        for track_id, cls_id, bbox in zip(
+            detection.tracker_id,
+            detection.class_id,
+            detection.xyxy,
         ):
             foot_x, foot_y = get_foot_position(bbox)
-            in_zone = self._point_in_polygon(foot_x, foot_y)
-
-            if not in_zone:
+            if not self._point_in_polygon(foot_x, foot_y):
                 continue
 
             current_ids.add(track_id)
+            cls_name = self.class_names.get(int(cls_id), str(cls_id))
 
-            # xe di vao zone
+            # ── Xe vừa vào zone ──
             if track_id not in self.inside_ids:
                 self.inside_ids.add(track_id)
-
                 self.active[track_id] = VehicleEvent(
                     track_id=track_id,
-                    cls=cls,
+                    cls=cls_name,           # lưu str ngay từ đầu
                     zone_id=self.config.zone_id,
                     first_seen=timestamp,
                     last_seen=timestamp,
@@ -77,49 +108,69 @@ class ZoneCounter:
                     exit_point=(foot_x, foot_y),
                 )
 
-            self.active[track_id].last_seen = timestamp
-            self.active[track_id].exit_point = (foot_x, foot_y)
+            # ── Cập nhật vị trí mới nhất ──
+            ev = self.active[track_id]
+            ev.last_seen = timestamp
+            ev.exit_point = (foot_x, foot_y)
 
-            # Đếm lần đầu tiên
+            # ── Đếm (chỉ 1 lần duy nhất cho mỗi track_id) ──
             if track_id not in self.counted_ids:
-                cls_name = self.class_names.get(int(cls), str(cls))
                 self.counted_ids.add(track_id)
                 self.counts[cls_name] = self.counts.get(cls_name, 0) + 1
-                ev = copy(self.active[track_id])
-                self.events.append(ev)
-                new_events.append(ev)
 
-        # Xe rời zone — tính time_in_zone và direction
+        # ── Xe rời zone → hoàn thiện event ──
+        return self._flush_exited(current_ids, timestamp)
+
+    def _flush_exited(
+        self,
+        current_ids: set[int],
+        timestamp: datetime,
+    ) -> list[VehicleEvent]:
+        completed: list[VehicleEvent] = []
         exited = self.inside_ids - current_ids
+
         for track_id in exited:
-            ev = self.active.get(track_id)
-            if ev:
-                ev.time_in_zone = (ev.last_seen - ev.first_seen).total_seconds()
-                ev.direction = self._compute_direction(
-                    ev.entry_point, ev.exit_point
-                )
-                # length (m) / time (s) -> m/s, *3.6 -> km/h
-                ev.speed = self.config.length / ev.time_in_zone * 3.6 if ev.time_in_zone > 0 else 0.0
-            self.inside_ids.discard(track_id)
-            self.active.pop(track_id, None)
-            # print(f"{ev.direction}, {ev.first_seen}, {ev.last_seen}, {ev.time_in_zone}s")
+            ev = self.active.pop(track_id, None)
+            if ev is None:
+                continue
 
-        return new_events
+            dt = (ev.last_seen - ev.first_seen).total_seconds()
+            ev.time_in_zone = dt
+            ev.direction = self._compute_direction(ev.entry_point, ev.exit_point)
+            ev.speed = self._compute_speed(ev.entry_point, ev.exit_point, dt)
 
-    def _compute_direction(self, entry_point, exit_point) -> str:
-        if not entry_point or not exit_point:
+            self.events.append(copy(ev))
+            completed.append(ev)
+
+        self.inside_ids -= exited
+        return completed
+
+    def _compute_direction(self, entry: tuple, exit_: tuple) -> str:
+        if entry is None or exit_ is None:
             return "unknown"
-
-        _, y1 = entry_point
-        _, y2 = exit_point
-        dy = y2 - y1
+        dy = exit_[1] - entry[1]
         return "down" if dy > 0 else "up"
 
-    def _point_in_polygon(self, foot_x: float, foot_y: float) -> bool:
-        return cv2.pointPolygonTest(self.polygon, (foot_x, foot_y), False) >= 0
+    def _compute_speed(
+        self,
+        entry: Optional[tuple[float, float]],
+        exit_: Optional[tuple[float, float]],
+        dt: float,
+    ) -> float:
+        if dt <= 0 or entry is None or exit_ is None:
+            return 0.0
+
+        pixel_dist = float(np.hypot(exit_[0] - entry[0], exit_[1] - entry[1]))
+
+        if pixel_dist < 1.0:
+            return round(self.config.length / dt * 3.6, 2)
+
+        return round(self.config.length / dt * 3.6, 2)
+
+    def _point_in_polygon(self, x: float, y: float) -> bool:
+        return cv2.pointPolygonTest(self.polygon, (x, y), False) >= 0
 
     def draw(self, frame: np.ndarray, show_count: bool = True) -> np.ndarray:
-
         color = self.config.color
 
         cv2.polylines(frame, [self.polygon], True, color, 2)
@@ -127,17 +178,19 @@ class ZoneCounter:
         overlay = frame.copy()
         cv2.fillPoly(overlay, [self.polygon], color)
         cv2.addWeighted(overlay, 0.2, frame, 0.8, 0, frame)
+
         if show_count:
             M = cv2.moments(self.polygon)
             if M["m00"] != 0:
                 cx = int(M["m10"] / M["m00"])
                 cy = int(M["m01"] / M["m00"])
                 total = sum(self.counts.values())
-                label = self.config.name or self.config.zone_id
-                cv2.putText(frame, f" {total}",
-                            (cx - 40, cy),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
-
+                cv2.putText(
+                    frame,
+                    str(total),
+                    (cx - 10, cy),
+                    _FONT, 0.9, color, 2,
+                )
 
         return frame
 
@@ -159,61 +212,59 @@ class ZoneCounter:
                         font, font_scale, color, thickness)
 
         return frame
+    def info_box_width(self) -> int:
 
+        label = self.config.name or self.config.zone_id
+        lines = [f"[{label}]"] + [f"  {cls}: {cnt}" for cls, cnt in self.counts.items()]
+        if not lines:
+            return 80
+        return max(
+            cv2.getTextSize(line, _FONT, _INFO_FONT_SCALE, _INFO_THICKNESS)[0][0]
+            for line in lines
+        )
 
 
 class ZoneCounterManager:
-    def __init__(self, zone_configs: list[ZoneConfig], class_names = None):
-        self.zones = {
+    def __init__(self, zone_configs: list[ZoneConfig], class_names: dict = None):
+        self.zones: dict[str, ZoneCounter] = {
             cfg.zone_id: ZoneCounter(cfg, class_names=class_names)
             for cfg in zone_configs
         }
 
-    def update_all(self, detection: sv.Detections, timestamp: datetime):
-
+    def update_all(
+        self,
+        detection: sv.Detections,
+        timestamp: datetime,
+    ) -> dict[str, list[VehicleEvent]]:
         if not self.zones:
             return {}
 
         all_events: dict[str, list[VehicleEvent]] = {}
         for zone_id, zone in self.zones.items():
-            new_events = zone.update(detection, timestamp)
-            if new_events:
-                all_events[zone_id] = new_events
-
+            completed = zone.update(detection, timestamp)
+            if completed:
+                all_events[zone_id] = completed
 
         return all_events
 
-    def get_all_counts(self) -> dict:
-
+    def get_all_counts(self) -> dict[str, dict[str, int]]:
         return {
             zone_id: zone.counts
             for zone_id, zone in self.zones.items()
         }
 
-    # def draw_all(self, frame: np.ndarray)-> np.ndarray:
-    #     for zone in self.zones.values():
-    #         zone.draw(frame)
-    #
-    #     return frame
-
-    def draw_all(self, frame: np.ndarray) -> np.ndarray:  # bỏ model đi
+    def draw_all(self, frame: np.ndarray) -> np.ndarray:
+        # Vẽ polygon của từng zone
         for zone in self.zones.values():
             zone.draw(frame)
 
-        x_start = 30
+        # Vẽ info boxes sắp ngang, không chồng lên nhau
+        x_cursor = 30
         y_start = 100
-        current_x = x_start
+        gap = 20
 
         for zone in self.zones.values():
-            label = zone.config.name or zone.config.zone_id
-            lines = [label] + [f"{cls} : {count}" for cls, count in zone.counts.items()]
-            font = cv2.FONT_HERSHEY_SIMPLEX
-            max_width = max(
-                cv2.getTextSize(line, font, 0.5, 1)[0][0]
-                for line in lines
-            ) if lines else 80
-
-            zone.draw_info_box(frame, (current_x, y_start))
-            current_x += max_width + 30
+            zone.draw_info_box(frame, (x_cursor, y_start))
+            x_cursor += zone.info_box_width() + gap
 
         return frame

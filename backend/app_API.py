@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from src.core.ml.Video_Processor import VideoProcessor
 from src.core.config import configs
 from src.utils.logger import setup_logger
-
+import queue
 import logging
 
 # set up logging
@@ -20,6 +20,7 @@ logging.basicConfig(
 
 logger = setup_logger(__name__)
 
+event_queue: queue.Queue = queue.Queue(maxsize=500)
 processor: VideoProcessor | None = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -30,6 +31,7 @@ async def lifespan(app: FastAPI):
         device=torch.device("cuda:0"),
         conf_thresh=0.5,
         iou_thresh=0.5,
+        event_queue=event_queue
     )
     logger.info("load xong model + preprocess cho stream")
     processor.start()
@@ -79,3 +81,9 @@ async def stream():
 async def get_counts():
     logger.info("lay so xe dem duoc tung vung")
     return processor.get_counts()
+
+
+# if __name__ == '__main__':
+#     import uvicorn
+#
+#     uvicorn.run(app, host="0.0.0.0", port=8000)
