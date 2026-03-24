@@ -13,12 +13,15 @@ import torch
 import numpy as np
 import time
 import json
+import queue
 
 from src.core.ml.mjpeg_reader import MJPEGReader
 from src.core.ml.Detection_Model import DetectionModel
 from src.core.ml.ZoneCounter import ZoneCounterManager, ZoneConfig
 from src.core.config import configs
+from src.utils.logger import setup_logger
 
+logger = setup_logger(__name__)
 
 def load_zone_manager(config_path: str, class_names) -> ZoneCounterManager:
     with open(config_path) as f:
@@ -33,7 +36,8 @@ class VideoProcessor:
                  weight_model: str,
                  device: torch.device,
                  conf_thresh: float,
-                 iou_thresh: float
+                 iou_thresh: float,
+                 event_queue: queue.Queue = None,
                  ) -> None:
         self._FRAME_SKIP = 1
         self.model = DetectionModel(
@@ -42,6 +46,7 @@ class VideoProcessor:
             conf_thresh=conf_thresh,
             iou_thresh=iou_thresh
         )
+        self.event_queue = event_queue
         self.roi = (2, 256, 1277, 611)
         self.reader = MJPEGReader(url_camera_ip)
         self.zone_manager = load_zone_manager(
@@ -110,8 +115,17 @@ class VideoProcessor:
     ) -> np.ndarray:
         detections = self.model.tracking_frame(frame=frame)
         frame_annotated = self.model.annotation_frame(frame=frame.copy(), detections=detections)
-        self.zone_manager.update_all(detection=detections, timestamp=timestamp)
         frame_annotated = self.zone_manager.draw_all(frame=frame_annotated)
+        events =self.zone_manager.update_all(detection=detections, timestamp=timestamp)
+        if events:
+            for zone_events in events.values():
+                for ev in zone_events:
+                    try:
+                        self.event_queue.put_nowait(ev)
+                    except queue.Full:
+                        pass
+
+        logger.info(f"frame {timestamp} , events: {events}")
         frame_annotated = self.draw_fps(frame=frame_annotated)
         return frame_annotated
 
