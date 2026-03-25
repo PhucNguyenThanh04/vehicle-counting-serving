@@ -2,9 +2,8 @@ import asyncio
 import queue
 import traceback
 from datetime import datetime
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from src.core.db import AsyncSessionLocal
+from src.core.database.db import AsyncSessionLocal
 from src.api.entities import Vehicle, ZoneCount
 from src.utils.logger import setup_logger
 

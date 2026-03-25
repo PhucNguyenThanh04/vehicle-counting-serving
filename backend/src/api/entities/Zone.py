@@ -5,10 +5,9 @@ from sqlalchemy import (
                         DateTime,
                         func,
                         Float,
-                        Index,
                         UniqueConstraint
                         )
-from src.core.db import Base
+from src.core.database.db import Base
 from datetime import datetime
 
 

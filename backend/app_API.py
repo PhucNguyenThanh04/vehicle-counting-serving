@@ -9,9 +9,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from src.core.ml.Video_Processor import VideoProcessor
 from src.core.config import configs
 from src.utils.logger import setup_logger
-from src.core.db import get_db, init_db
-from src.api import entities
-from src.api.repositories.writer import DBWriter
+from src.core.database.db import init_db
+from src.core.database.writer import DBWriter
 import queue
 import logging
 
