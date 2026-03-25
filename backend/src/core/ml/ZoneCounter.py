@@ -118,7 +118,6 @@ class ZoneCounter:
                 self.counted_ids.add(track_id)
                 self.counts[cls_name] = self.counts.get(cls_name, 0) + 1
 
-        # ── Xe rời zone → hoàn thiện event ──
         return self._flush_exited(current_ids, timestamp)
 
     def _flush_exited(
