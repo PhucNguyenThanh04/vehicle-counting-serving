@@ -125,7 +125,7 @@ class VideoProcessor:
                     except queue.Full:
                         pass
 
-        logger.info(f"frame {timestamp} , events: {events}")
+        # logger.info(f"frame {timestamp} , events: {events}")
         frame_annotated = self.draw_fps(frame=frame_annotated)
         return frame_annotated
 
@@ -164,5 +164,4 @@ class VideoProcessor:
             return self._jpg_cache
 
     def get_counts(self) -> dict:
-        """Đọc thẳng từ zone_manager — không cần queue."""
         return self.zone_manager.get_all_counts()

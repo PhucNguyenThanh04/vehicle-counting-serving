@@ -9,8 +9,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from src.core.ml.Video_Processor import VideoProcessor
 from src.core.config import configs
 from src.utils.logger import setup_logger
+from src.core.db import get_db, init_db
+from src.api import entities
+from src.api.repositories.writer import DBWriter
 import queue
 import logging
+
 
 # set up logging
 logging.basicConfig(
@@ -24,6 +28,8 @@ event_queue: queue.Queue = queue.Queue(maxsize=500)
 processor: VideoProcessor | None = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    await init_db()
+
     global processor
     processor = VideoProcessor(
         url_camera_ip=configs.STREAM_URL,
@@ -33,9 +39,20 @@ async def lifespan(app: FastAPI):
         iou_thresh=0.5,
         event_queue=event_queue
     )
+    db_writer = DBWriter(
+        event_queue=event_queue,
+        batch_size=50,
+        flush_interval=2.0,
+        count_interval=30.0,
+    )
+
     logger.info("load xong model + preprocess cho stream")
     processor.start()
+
+    asyncio.create_task(db_writer.start(processor))
+
     yield
+    await db_writer.stop()
     processor.stop()
 
 app = FastAPI(
