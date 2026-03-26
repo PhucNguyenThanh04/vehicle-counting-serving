@@ -10,7 +10,6 @@ from src.utils.logger import setup_logger
 logger = setup_logger(__name__)
 
 class DBWriter:
-
     def __init__(
         self,
         event_queue: queue.Queue,
@@ -18,12 +17,12 @@ class DBWriter:
         flush_interval: float = 2.0,    # giây
         count_interval: float = 30.0,   # giây
     ):
-        self._event_queue    = event_queue
-        self._batch_size     = batch_size
+        self._event_queue = event_queue
+        self._batch_size = batch_size
         self._flush_interval = flush_interval
         self._count_interval = count_interval
-        self._pending: list  = []        # buffer chờ insert
-        self._running        = False
+        self._pending: list = []
+        self._running = False
 
     async def start(self, processor):
         self._running   = True
@@ -42,7 +41,6 @@ class DBWriter:
         last_flush = asyncio.get_event_loop().time()
 
         while self._running:
-            # Drain queue không blocking
             try:
                 while True:
                     ev = self._event_queue.get_nowait()

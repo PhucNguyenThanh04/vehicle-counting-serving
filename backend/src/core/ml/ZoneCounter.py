@@ -69,15 +69,7 @@ class ZoneCounter:
         detection: sv.Detections,
         timestamp: datetime,
     ) -> list[VehicleEvent]:
-        """
-        Cập nhật zone với detections mới.
 
-        Returns
-        -------
-        list[VehicleEvent]
-            Các event **vừa hoàn chỉnh** trong frame này
-            (xe vừa rời zone, đã có speed / direction / time_in_zone).
-        """
         if detection.tracker_id is None or len(detection.tracker_id) == 0:
             return self._flush_exited(set(), timestamp)
 
@@ -113,7 +105,6 @@ class ZoneCounter:
             ev.last_seen = timestamp
             ev.exit_point = (foot_x, foot_y)
 
-            # ── Đếm (chỉ 1 lần duy nhất cho mỗi track_id) ──
             if track_id not in self.counted_ids:
                 self.counted_ids.add(track_id)
                 self.counts[cls_name] = self.counts.get(cls_name, 0) + 1
@@ -148,8 +139,10 @@ class ZoneCounter:
         if entry is None or exit_ is None:
             return "unknown"
         dy = exit_[1] - entry[1]
+        threshold = 20
+        if abs(dy) < threshold:
+            return "unknown"
         return "down" if dy > 0 else "up"
-
     def _compute_speed(
         self,
         entry: Optional[tuple[float, float]],
@@ -177,19 +170,28 @@ class ZoneCounter:
         overlay = frame.copy()
         cv2.fillPoly(overlay, [self.polygon], color)
         cv2.addWeighted(overlay, 0.2, frame, 0.8, 0, frame)
-
         if show_count:
             M = cv2.moments(self.polygon)
             if M["m00"] != 0:
                 cx = int(M["m10"] / M["m00"])
                 cy = int(M["m01"] / M["m00"])
                 total = sum(self.counts.values())
-                cv2.putText(
-                    frame,
-                    str(total),
-                    (cx - 10, cy),
-                    _FONT, 0.9, color, 2,
-                )
+                # cv2.putText(
+                #     frame,
+                #     f"{self.config.zone_id} + \n + {str(total)}",
+                #     (cx - 10, cy),
+                #     _FONT, 0.9, color, 2,
+                # )
+                line1 = str(self.config.zone_id)
+                line2 = str(total)
+
+                (text_w1, text_h1), _ = cv2.getTextSize(line1, _FONT, 0.9, 2)
+                (text_w2, text_h2), _ = cv2.getTextSize(line2, _FONT, 0.9, 2)
+
+                # căn giữa
+                cv2.putText(frame, line1, (cx - text_w1 // 2, cy - 10), _FONT, 0.9, color, 2)
+                cv2.putText(frame, line2, (cx - text_w2 // 2, cy + text_h2 +5), _FONT, 0.9, color, 2)
+
 
         return frame
 
@@ -257,7 +259,6 @@ class ZoneCounterManager:
         for zone in self.zones.values():
             zone.draw(frame)
 
-        # Vẽ info boxes sắp ngang, không chồng lên nhau
         x_cursor = 30
         y_start = 100
         gap = 20
