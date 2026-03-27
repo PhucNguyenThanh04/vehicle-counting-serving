@@ -258,4 +258,5 @@ class ZoneCounterManager:
             # zone.draw_info_box(frame, (x_cursor, y_start))
             x_cursor += zone.info_box_width() + gap
 
+
         return frame
