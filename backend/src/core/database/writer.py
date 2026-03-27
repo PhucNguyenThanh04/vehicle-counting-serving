@@ -106,7 +106,6 @@ class DBWriter:
             try:
                 for zone_id, class_counts in counts.items():
                     for cls, count in class_counts.items():
-                        # UPSERT — update nếu đã có (zone_id, cls)
                         stmt = pg_insert(ZoneCount).values(
                             zone_id=str(zone_id),
                             cls=cls,

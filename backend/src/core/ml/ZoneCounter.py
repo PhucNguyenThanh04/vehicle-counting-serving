@@ -139,10 +139,8 @@ class ZoneCounter:
         if entry is None or exit_ is None:
             return "unknown"
         dy = exit_[1] - entry[1]
-        threshold = 20
-        if abs(dy) < threshold:
-            return "unknown"
         return "down" if dy > 0 else "up"
+
     def _compute_speed(
         self,
         entry: Optional[tuple[float, float]],
@@ -176,12 +174,6 @@ class ZoneCounter:
                 cx = int(M["m10"] / M["m00"])
                 cy = int(M["m01"] / M["m00"])
                 total = sum(self.counts.values())
-                # cv2.putText(
-                #     frame,
-                #     f"{self.config.zone_id} + \n + {str(total)}",
-                #     (cx - 10, cy),
-                #     _FONT, 0.9, color, 2,
-                # )
                 line1 = str(self.config.zone_id)
                 line2 = str(total)
 
@@ -192,27 +184,26 @@ class ZoneCounter:
                 cv2.putText(frame, line1, (cx - text_w1 // 2, cy - 10), _FONT, 0.9, color, 2)
                 cv2.putText(frame, line2, (cx - text_w2 // 2, cy + text_h2 +5), _FONT, 0.9, color, 2)
 
-
         return frame
 
-    def draw_info_box(self, frame: np.ndarray, position: tuple[int, int]) -> np.ndarray:
-        x, y = position
-        color = self.config.color
-        label = self.config.zone_id
-
-        lines = [f"len {label}:"] + [f"{cls} : {count}" for cls, count in self.counts.items()]
-
-        font = cv2.FONT_HERSHEY_SIMPLEX
-        font_scale = 0.5
-        thickness = 2
-        line_height = 20
-
-        for i, line in enumerate(lines):
-            cv2.putText(frame, line,
-                        (x, y + line_height * i),
-                        font, font_scale, color, thickness)
-
-        return frame
+    # def draw_info_box(self, frame: np.ndarray, position: tuple[int, int]) -> np.ndarray:
+    #     x, y = position
+    #     color = self.config.color
+    #     label = self.config.zone_id
+    #
+    #     lines = [f"len {label}:"] + [f"{cls} : {count}" for cls, count in self.counts.items()]
+    #
+    #     font = cv2.FONT_HERSHEY_SIMPLEX
+    #     font_scale = 0.5
+    #     thickness = 2
+    #     line_height = 20
+    #
+    #     for i, line in enumerate(lines):
+    #         cv2.putText(frame, line,
+    #                     (x, y + line_height * i),
+    #                     font, font_scale, color, thickness)
+    #
+    #     return frame
     def info_box_width(self) -> int:
 
         label = self.config.name or self.config.zone_id
@@ -264,7 +255,7 @@ class ZoneCounterManager:
         gap = 20
 
         for zone in self.zones.values():
-            zone.draw_info_box(frame, (x_cursor, y_start))
+            # zone.draw_info_box(frame, (x_cursor, y_start))
             x_cursor += zone.info_box_width() + gap
 
         return frame
