@@ -116,7 +116,7 @@ class VideoProcessor:
         detections = self.model.tracking_frame(frame=frame)
         frame_annotated = self.model.annotation_frame(frame=frame.copy(), detections=detections)
         frame_annotated = self.zone_manager.draw_all(frame=frame_annotated)
-        events =self.zone_manager.update_all(detection=detections, timestamp=timestamp)
+        events = self.zone_manager.update_all(detection=detections, timestamp=timestamp)
         if events:
             for zone_events in events.values():
                 for ev in zone_events:

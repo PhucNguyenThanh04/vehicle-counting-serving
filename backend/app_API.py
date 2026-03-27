@@ -2,16 +2,15 @@ from contextlib import asynccontextmanager
 import asyncio
 import torch
 
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.core.ml.Video_Processor import VideoProcessor
 from src.core.config import configs
 from src.utils.logger import setup_logger
-from src.core.db import get_db, init_db
-from src.api import entities
-from src.api.repositories.writer import DBWriter
+from src.core.database.db import init_db
+from src.core.database.writer import DBWriter
 import queue
 import logging
 
@@ -94,11 +93,36 @@ async def stream():
         media_type="multipart/x-mixed-replace; boundary=frame",
     )
 
-@app.get("/counts")
-async def get_counts():
-    logger.info("lay so xe dem duoc tung vung")
-    return processor.get_counts()
+#
+# @app.get("/counts")
+# async def get_counts():
+#     logger.info("lay so xe dem duoc tung vung")
+#     return processor.get_counts()
 
+
+@app.websocket("/counts")
+async def websocket_endpoint(ws: WebSocket):
+    await ws.accept()
+    print("Client connected")
+
+    try:
+        while True:
+            data = {
+                "counts": processor.get_counts(),
+                "events": []
+            }
+
+            await ws.send_json(data)
+            await asyncio.sleep(0.5)
+
+    except WebSocketDisconnect:
+        logger.error("Client disconnected")
+
+    except Exception as e:
+        logger.error("Unexpected error:", e)
+
+    finally:
+        logger.error("Connection closed")
 
 # if __name__ == '__main__':
 #     import uvicorn

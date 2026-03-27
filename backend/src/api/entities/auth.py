@@ -1,5 +1,5 @@
-from src.core.db import Base
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, func
+from src.core.database.db import Base
+from sqlalchemy import Column, String, Boolean, DateTime, func
 import uuid
 from sqlalchemy.dialects.postgresql import UUID
 

@@ -1,5 +1,5 @@
-from src.core.db import Base
-from sqlalchemy import Column, Integer, String, DateTime, func, Index
+from src.core.database.db import Base
+from sqlalchemy import Column, Integer, String, DateTime, func
 
 
 class Vehicle(Base):
